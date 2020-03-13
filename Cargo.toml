@@ -1,0 +1,14 @@
+[package]
+name = "midie"
+version = "0.1.0"
+authors = ["tinaxd <31384595+tinaxd@users.noreply.github.com>"]
+edition = "2018"
+
+# See more keys and their definitions at https://doc.rust-lang.org/cargo/reference/manifest.html
+
+[dependencies]
+gtk = {version="*", default-features=false, features=["v3_22"]}
+cairo-rs = "*"
+
+[dependencies.rimd]
+git = "https://github.com/RustAudio/rimd.git"
