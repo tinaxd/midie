@@ -12,13 +12,13 @@ pub fn construct_main_window() {
     window.show();
 
     let main_scrolled = builder.get_object::<gtk::ScrolledWindow>("mainScrolledWindow").unwrap();
-    let main_viewport = builder.get_object::<gtk::Viewport>("mainViewport").unwrap();
+    let _main_viewport = builder.get_object::<gtk::Viewport>("mainViewport").unwrap();
 
     let drawarea = builder.get_object::<gtk::DrawingArea>("mainDrawingArea").unwrap();
 
     let open_toolbar_button = builder.get_object::<gtk::ToolButton>("openToolbarButton").unwrap();
 
-    let mut ws: Rc<RefCell<crate::smf::MidiWorkspace>> = Rc::new(RefCell::new(crate::smf::MidiWorkspace::default()));
+    let ws: Rc<RefCell<crate::smf::MidiWorkspace>> = Rc::new(RefCell::new(crate::smf::MidiWorkspace::default()));
 
     let white_height: f64 = 30.0;
     let white_width: f64 = 60.0;
@@ -27,7 +27,7 @@ pub fn construct_main_window() {
 
     let ws_c = Rc::clone(&ws);
     let window_c = window.clone();
-    open_toolbar_button.connect_clicked(move |b| {
+    open_toolbar_button.connect_clicked(move |_| {
         use gtk::ResponseType::{Cancel, Accept};
         let chooser = gtk::FileChooserDialog::with_buttons(
             Some("Open SMF"), Some(&window_c),
@@ -44,22 +44,21 @@ pub fn construct_main_window() {
         match response {
             Accept => {
                 if let Some(smf_path) = chooser.get_filename() {
-                    println!("smf_path: {:?}", smf_path.to_str());
+                    debug!("smf_path: {:?}", smf_path.to_str());
                     let new_ws = crate::smf::MidiWorkspace::from_smf_file(smf_path);
                     match new_ws {
                         Ok(new_ws) => {
-                            println!("new ws");
                             let mut ws = RefCell::borrow_mut(&*ws_c);
                             *ws = new_ws;
                         },
-                        Err(e) => println!("error: {}", e)
+                        Err(e) => warn!("error: {}", e)
                     }
                 } else {
-                    println!("could not get filename");
+                    warn!("could not get filename");
                 }
             },
             Cancel => {
-                println!("Canceled by user");
+                debug!("Canceled by user");
             },
             _ => unreachable!()
         }
@@ -69,21 +68,27 @@ pub fn construct_main_window() {
     let draw_all = {
         let main_scrolled_c = main_scrolled.clone();
         let ws_c = Rc::clone(&ws);
-        move |_: &gtk::DrawingArea, cr: &cairo::Context| {
+        move |w: &gtk::DrawingArea, cr: &cairo::Context| {
             use super::pianoroll::WHITE_KEYS;
+            use super::pianoroll::{PianorollConfig, Viewport};
             let ws_cc = Rc::clone(&ws_c);
-            let ctx = PianorollContext {
-                left_upper_x: main_scrolled_c.get_hadjustment().unwrap().get_value(),
-                left_upper_y: main_scrolled_c.get_vadjustment().unwrap().get_value(),
-                white_height,
-                white_width,
-                black_height,
-                black_width,
-                max_width: 100.0,
-                note_height: (white_height * WHITE_KEYS as f64) / (WHITE_KEYS + (WHITE_KEYS / 5)) as f64,
-                ws: ws_cc
-            };
-            super::pianoroll::pianoroll_draw_handler(cr, &ctx)
+            let ctx = PianorollContext::new(
+                Viewport {
+                    left_upper_x: main_scrolled_c.get_hadjustment().unwrap().get_value(),
+                    left_upper_y: main_scrolled_c.get_vadjustment().unwrap().get_value(),
+                    max_width: 10000.0,
+                },
+                PianorollConfig {
+                    white_height,
+                    white_width,
+                    black_height,
+                    black_width,
+                    note_height: (white_height * WHITE_KEYS as f64) / 128.0,
+                    beat_width: 75.0,
+                },
+                ws_cc
+            );
+            super::pianoroll::pianoroll_draw_handler(w, cr, &ctx)
         }
     };
 

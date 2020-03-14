@@ -9,6 +9,9 @@ edition = "2018"
 [dependencies]
 gtk = {version="*", default-features=false, features=["v3_22"]}
 cairo-rs = "*"
+pangocairo = "*"
+log = "*"
+env_logger = "*"
 
 [dependencies.rimd]
 git = "https://github.com/RustAudio/rimd.git"
