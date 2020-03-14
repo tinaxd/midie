@@ -8,6 +8,7 @@ edition = "2018"
 
 [dependencies]
 gtk = {version="*", default-features=false, features=["v3_22"]}
+gdk = "*"
 cairo-rs = "*"
 pangocairo = "*"
 log = "*"

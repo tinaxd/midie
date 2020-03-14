@@ -6,12 +6,67 @@ use std::cell::RefCell;
 
 pub const WHITE_KEYS: i32 = 69;
 
+macro_rules! try_opt {
+    ($o: expr) => {{
+        match $o {
+            Some(v) => v,
+            None => return None
+        }
+    }}
+}
+
 #[derive(Debug, Clone)]
 pub struct PianorollContext {
     pub viewport: Viewport,
     pub config: PianorollConfig,
     pub ws: Rc<RefCell<MidiWorkspace>>,
-    note_height_cache: RefCell<Vec<f64>>
+    note_height_cache: RefCell<Vec<f64>>,
+    editing_state: EditingContext,
+}
+
+#[derive(Debug, Clone)]
+struct EditingContext {
+    click_state: ClickState,
+    quantize_unit: u64,
+}
+
+impl Default for EditingContext {
+    fn default() -> Self {
+        EditingContext {
+            click_state: ClickState::default(),
+            quantize_unit: 224/4,
+        }
+    }
+}
+
+impl EditingContext {
+    pub fn new() -> Self {
+        Self::default()
+    }
+
+    pub fn click_state(&self) -> ClickState {
+        self.click_state
+    }
+
+    pub fn quantize(&self) -> u64 {
+        self.quantize_unit
+    }
+
+    pub fn set_quantize(&mut self, quantize: u64) {
+        self.quantize_unit = quantize;
+    }
+}
+
+#[derive(Debug, Clone, Copy)]
+enum ClickState {
+    Released,
+    Clicked((f64, f64)),
+}
+
+impl Default for ClickState {
+    fn default() -> Self {
+        ClickState::Released
+    }
 }
 
 # [derive(Debug, Clone)]
@@ -26,7 +81,8 @@ impl PianorollContext {
     pub fn new(viewport: Viewport, config: PianorollConfig, ws: Rc<RefCell<MidiWorkspace>>) -> Self {
         PianorollContext {
             viewport, config, ws,
-            note_height_cache: RefCell::new(vec![0.0; 128])
+            note_height_cache: RefCell::new(vec![0.0; 128]),
+            editing_state: EditingContext::new(),
         }
     }
 }
@@ -128,6 +184,7 @@ impl PianorollContext {
                 for i in 1..=n_keys {
                     let y = last_c + h_line_interval * i as f64;
                     *cache.get_mut(processing_note).unwrap() = y;
+                    //println!("processing_note: {}", processing_note);
                     cr.move_to(white_width, y);
                     cr.line_to(max_width, y);
                     if i == n_keys {
@@ -289,6 +346,50 @@ impl PianorollContext {
         }
 
         (note_drawing, Vec::new())
+    }
+
+    pub fn handle_clicked(&mut self, event: &gdk::EventButton) {
+        let pos = event.get_position();
+        self.editing_state.click_state = ClickState::Clicked(pos);
+        debug!("Clicked: {:?}", pos);
+    }
+
+    pub fn handle_click_released(&mut self, event: &gdk::EventButton) {
+        match self.editing_state.click_state() {
+            ClickState::Clicked(clicked_pos) => {
+                let release_pos = event.get_position();
+                let clicked_pos_parsed = self.parse_click_position(clicked_pos);
+                let release_pos_parsed = self.parse_click_position(release_pos);
+                debug!("Released: {:?} ({:?}) -> {:?} ({:?})", clicked_pos_parsed, clicked_pos, release_pos_parsed, release_pos);
+            },
+            _ => {}
+        }
+        self.editing_state.click_state = ClickState::Released;
+    }
+
+    /// returns (abs_tick, note)
+    fn parse_click_position(&self, pos: (f64, f64)) -> Option<(u64, u8)> {
+        if pos.0 < self.config.white_width {
+            // clicked keyboard area
+            return None;
+        }
+
+        let note_height = self.note_height_cache.borrow();
+        let mut note = None;
+        for i in 12..128 {
+            let v = *note_height.get(i).unwrap();
+            //println!("cache: {:?}", note_height);
+            //println!("{} > {}", pos.1, v);
+            if pos.1 > v {
+                note = Some((i as i32 - 1) as u8); // TODO: really?
+                break;
+            }
+        }
+        let note = try_opt!(note);
+        let abs_x = self.viewport.left_upper_x + pos.0 - self.config.white_width;
+        let ws = Rc::clone(&self.ws);
+        let abs_tick = ((abs_x * ws.borrow().resolution() as f64) / self.config.beat_width) as u64;
+        Some((abs_tick, note))
     }
 }
 

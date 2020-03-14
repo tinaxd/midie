@@ -94,6 +94,22 @@ pub fn construct_main_window() {
         }
     };
 
+    let draw_clicked = {
+        let ps_c = Rc::clone(&ps);
+        move |_: &gtk::DrawingArea, ev: &gdk::EventButton| {
+            ps_c.borrow_mut().handle_clicked(ev);
+            Inhibit(true)
+        }
+    };
+
+    let draw_click_released = {
+        let ps_c = Rc::clone(&ps);
+        move |_: &gtk::DrawingArea, ev: &gdk::EventButton| {
+            ps_c.borrow_mut().handle_click_released(ev);
+            Inhibit(true)
+        }
+    };
+
     let redraw_all_h = {
         let main_scrolled_c = main_scrolled.clone();
         let draw_area_c = drawarea.clone();
@@ -121,8 +137,12 @@ pub fn construct_main_window() {
     };
 
     drawarea.connect_draw(draw_all);
+    drawarea.connect_button_press_event(draw_clicked);
+    drawarea.connect_button_release_event(draw_click_released);
+
     main_scrolled.get_hadjustment().unwrap().connect_value_changed(redraw_all_h);
     main_scrolled.get_hadjustment().unwrap().connect_value_changed(redraw_all_v);
+
     drawarea.set_size_request(10000, white_height as i32 * super::pianoroll::WHITE_KEYS);
 
     gtk::main();
