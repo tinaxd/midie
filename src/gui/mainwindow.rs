@@ -16,6 +16,7 @@ pub fn construct_main_window() {
     let drawarea = builder.get_object::<gtk::DrawingArea>("mainDrawingArea").unwrap();
 
     let open_toolbar_button = builder.get_object::<gtk::ToolButton>("openToolbarButton").unwrap();
+    let redraw_button = builder.get_object::<gtk::ToolButton>("redrawButton").unwrap();
 
     let ws: Rc<RefCell<crate::smf::MidiWorkspace>> = Rc::new(RefCell::new(crate::smf::MidiWorkspace::default()));
 
@@ -144,6 +145,11 @@ pub fn construct_main_window() {
     main_scrolled.get_hadjustment().unwrap().connect_value_changed(redraw_all_v);
 
     drawarea.set_size_request(10000, white_height as i32 * super::pianoroll::WHITE_KEYS);
+
+    let drawarea_c = drawarea.clone();
+    redraw_button.connect_clicked(move |_| {
+        drawarea_c.queue_draw();
+    });
 
     gtk::main();
 }

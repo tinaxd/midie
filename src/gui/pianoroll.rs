@@ -34,7 +34,7 @@ impl Default for EditingContext {
     fn default() -> Self {
         EditingContext {
             click_state: ClickState::default(),
-            quantize_unit: 224/4,
+            quantize_unit: 480/4,
         }
     }
 }
@@ -126,7 +126,7 @@ impl PianorollContext {
         cr.set_matrix(init_transform);
         cr.translate(self.config.white_width, 0.0);
         if let Some(track) = self.ws.borrow().events_abs_tick(1) {
-            self.draw_notes(cr, &track, &NoteDrawBounds {
+            self.draw_notes(cr, &track.events(), &NoteDrawBounds {
                 left: 0.0,
                 right: 0.0,
                 upper: 0.0,
@@ -232,9 +232,10 @@ impl PianorollContext {
             let end_cord = self.calculate_note_h_cord(note.end_tick);
             cr.rectangle(start_cord, note_height, end_cord - start_cord, self.config.note_height);
             cr.fill();
+            debug!("[{}] ({}, {}) -> ({}, {})", _note_drawn, start_cord, note_height, end_cord, note_height + self.config.note_height);
             _note_drawn += 1;
         }
-        debug!("Redrew {} notes", _note_drawn);
+        //debug!("Redrew {} notes", _note_drawn);
     }
 
     fn calculate_note_v_cord(&self, note: u8) -> f64 {
@@ -247,7 +248,7 @@ impl PianorollContext {
         let ws = self.ws.borrow();
         let beat_tick = ws.resolution();
 
-        beat_width * (abs_tick / beat_tick as u64) as f64
+        beat_width * (abs_tick as f64 / beat_tick as f64) as f64
     }
 
     fn draw_timeline<W: WidgetExt>(&self, w: &W, cr: &Context) {
@@ -361,10 +362,29 @@ impl PianorollContext {
                 let clicked_pos_parsed = self.parse_click_position(clicked_pos);
                 let release_pos_parsed = self.parse_click_position(release_pos);
                 debug!("Released: {:?} ({:?}) -> {:?} ({:?})", clicked_pos_parsed, clicked_pos, release_pos_parsed, release_pos);
+                if clicked_pos_parsed.is_some() && release_pos_parsed.is_some() {
+                    let (start_tick, note) = clicked_pos_parsed.unwrap();
+                    let (end_tick, _) = release_pos_parsed.unwrap();
+                    let ws = Rc::clone(&self.ws);
+                    let mut ws = ws.borrow_mut();
+                    let mut track = ws.events_abs_tick(1).unwrap();
+                    track.append_notes(vec![
+                        (self.quantize_time(start_tick), note, 100, 0),
+                        (self.quantize_time(end_tick), note, 0, 0)
+                    ]);
+                    track.clean();
+                    ws.replace_events(1, track.into());
+                    //println!("{:#?}", ws.events_abs_tick(1).unwrap());
+                    debug!("add note {} (tick {} -> {})", note, self.quantize_time(start_tick), self.quantize_time(end_tick));
+                }
             },
             _ => {}
         }
         self.editing_state.click_state = ClickState::Released;
+    }
+
+    fn quantize_time(&self, abs_tick: u64) -> u64 {
+        abs_tick - (abs_tick % self.editing_state.quantize_unit)
     }
 
     /// returns (abs_tick, note)
@@ -398,6 +418,6 @@ fn build_drawing_graph_test0() {
     use crate::smf::MidiWorkspace;
     let ws = MidiWorkspace::from_smf_file("test_midi0.mid").unwrap();
     let track0 = ws.events_abs_tick(1).unwrap();
-    let (g, _) = build_drawing_graph(&track0);
+    let (g, _) = PianorollContext::build_drawing_graph(&track0.events());
     println!("{:#?}", g);
 }
