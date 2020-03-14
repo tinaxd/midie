@@ -1,5 +1,4 @@
 use gtk::prelude::*;
-use crate::gui::pianoroll::PianorollContext;
 use std::rc::Rc;
 use std::cell::RefCell;
 
@@ -20,10 +19,27 @@ pub fn construct_main_window() {
 
     let ws: Rc<RefCell<crate::smf::MidiWorkspace>> = Rc::new(RefCell::new(crate::smf::MidiWorkspace::default()));
 
+    use super::pianoroll::{Viewport, PianorollConfig, WHITE_KEYS};
     let white_height: f64 = 30.0;
     let white_width: f64 = 60.0;
     let black_height: f64 = 20.0;
     let black_width: f64 = 25.0;
+    let ps: Rc<RefCell<super::pianoroll::PianorollContext>> = Rc::new(RefCell::new(super::pianoroll::PianorollContext::new(
+        Viewport {
+            left_upper_x: main_scrolled.get_hadjustment().unwrap().get_value(),
+            left_upper_y: main_scrolled.get_vadjustment().unwrap().get_value(),
+            max_width: 10000.0,
+        },
+        PianorollConfig {
+            white_height,
+            white_width,
+            black_height,
+            black_width,
+            note_height: (white_height * WHITE_KEYS as f64) / 128.0,
+            beat_width: 75.0,
+        },
+        Rc::clone(&ws)
+    )));
 
     let ws_c = Rc::clone(&ws);
     let window_c = window.clone();
@@ -66,29 +82,15 @@ pub fn construct_main_window() {
     });
 
     let draw_all = {
+        let ps_c = Rc::clone(&ps);
         let main_scrolled_c = main_scrolled.clone();
-        let ws_c = Rc::clone(&ws);
         move |w: &gtk::DrawingArea, cr: &cairo::Context| {
-            use super::pianoroll::WHITE_KEYS;
-            use super::pianoroll::{PianorollConfig, Viewport};
-            let ws_cc = Rc::clone(&ws_c);
-            let ctx = PianorollContext::new(
-                Viewport {
-                    left_upper_x: main_scrolled_c.get_hadjustment().unwrap().get_value(),
-                    left_upper_y: main_scrolled_c.get_vadjustment().unwrap().get_value(),
-                    max_width: 10000.0,
-                },
-                PianorollConfig {
-                    white_height,
-                    white_width,
-                    black_height,
-                    black_width,
-                    note_height: (white_height * WHITE_KEYS as f64) / 128.0,
-                    beat_width: 75.0,
-                },
-                ws_cc
-            );
-            super::pianoroll::pianoroll_draw_handler(w, cr, &ctx)
+            ps_c.borrow_mut().viewport = Viewport {
+                left_upper_x: main_scrolled_c.get_hadjustment().unwrap().get_value(),
+                left_upper_y: main_scrolled_c.get_vadjustment().unwrap().get_value(),
+                max_width: 10000.0,
+            };
+            ps_c.borrow().pianoroll_draw_handler(w, cr)
         }
     };
 
