@@ -126,11 +126,12 @@ impl PianorollContext {
         cr.set_matrix(init_transform);
         cr.translate(self.config.white_width, 0.0);
         if let Some(track) = self.ws.borrow().events_abs_tick(1) {
+            let alloc = w.get_allocation();
             self.draw_notes(cr, &track.events(), &NoteDrawBounds {
-                left: 0.0,
-                right: 0.0,
-                upper: 0.0,
-                lower: 0.0
+                left: self.viewport.left_upper_x,
+                right: self.viewport.left_upper_x + alloc.width as f64,
+                upper: self.viewport.left_upper_y,
+                lower: self.viewport.left_upper_y + alloc.height as f64
             });
         }
 
@@ -220,16 +221,26 @@ impl PianorollContext {
         }
     }
 
-    fn draw_notes(&self, cr: &Context, track: &Vec<crate::smf::AbsTrackEvent>, _bounds: &NoteDrawBounds) {
+    fn draw_notes(&self, cr: &Context, track: &Vec<crate::smf::AbsTrackEvent>, bounds: &NoteDrawBounds) {
         let (notes, _) = Self::build_drawing_graph(track);
-        // TODO: use bounds to efficient drawing
 
         let mut _note_drawn = 0;
         cr.set_source_rgba(1.0, 0.0, 0.0, 1.0);
         for note in &notes {
-            let note_height = self.calculate_note_v_cord(note.note);
             let start_cord = self.calculate_note_h_cord(note.start_tick);
+            if start_cord < bounds.left {
+                //debug!("start_cord: {} bounds.left: {}", start_cord, bounds.left);
+                continue;
+            } else if start_cord > bounds.right {
+                //debug!("start_cord: {} bounds.right: {}", start_cord, bounds.right);
+                break;
+            }
             let end_cord = self.calculate_note_h_cord(note.end_tick);
+            let note_height = self.calculate_note_v_cord(note.note);
+            if note_height < bounds.upper || note_height > bounds.lower {
+                //debug!("note_height: {} bounds.upper: {} bounds.lower: {}", note_height, bounds.upper, bounds.lower);
+                continue;
+            }
             cr.rectangle(start_cord, note_height, end_cord - start_cord, self.config.note_height);
             cr.fill();
             debug!("[{}] ({}, {}) -> ({}, {})", _note_drawn, start_cord, note_height, end_cord, note_height + self.config.note_height);
@@ -355,36 +366,52 @@ impl PianorollContext {
         debug!("Clicked: {:?}", pos);
     }
 
-    pub fn handle_click_released(&mut self, event: &gdk::EventButton) {
-        match self.editing_state.click_state() {
+    /// returns whether redraw is needed.
+    pub fn handle_click_released(&mut self, event: &gdk::EventButton) -> bool {
+        let res = match self.editing_state.click_state() {
             ClickState::Clicked(clicked_pos) => {
                 let release_pos = event.get_position();
                 let clicked_pos_parsed = self.parse_click_position(clicked_pos);
                 let release_pos_parsed = self.parse_click_position(release_pos);
                 debug!("Released: {:?} ({:?}) -> {:?} ({:?})", clicked_pos_parsed, clicked_pos, release_pos_parsed, release_pos);
                 if clicked_pos_parsed.is_some() && release_pos_parsed.is_some() {
-                    let (start_tick, note) = clicked_pos_parsed.unwrap();
-                    let (end_tick, _) = release_pos_parsed.unwrap();
-                    let ws = Rc::clone(&self.ws);
-                    let mut ws = ws.borrow_mut();
-                    let mut track = ws.events_abs_tick(1).unwrap();
-                    track.append_notes(vec![
-                        (self.quantize_time(start_tick), note, 100, 0),
-                        (self.quantize_time(end_tick), note, 0, 0)
-                    ]);
-                    track.clean();
-                    ws.replace_events(1, track.into());
-                    //println!("{:#?}", ws.events_abs_tick(1).unwrap());
-                    debug!("add note {} (tick {} -> {})", note, self.quantize_time(start_tick), self.quantize_time(end_tick));
+                    let (mut start_tick, note) = clicked_pos_parsed.unwrap();
+                    let (mut end_tick, _) = release_pos_parsed.unwrap();
+                    start_tick = self.quantize_time(start_tick);
+                    end_tick = self.quantize_time(end_tick);
+                    if start_tick >= end_tick {
+                        false
+                    } else {
+                        let ws = Rc::clone(&self.ws);
+                        let mut ws = ws.borrow_mut();
+                        let mut track = ws.events_abs_tick(1).unwrap();
+                        track.append_notes(vec![
+                            (start_tick, note, 100, 0),
+                            (end_tick, note, 0, 0)
+                        ]);
+                        track.clean();
+                        ws.replace_events(1, track.into());
+                        //println!("{:#?}", ws.events_abs_tick(1).unwrap());
+                        debug!("add note {} (tick {} -> {})", note, start_tick, end_tick);
+                        true
+                    }
+                } else {
+                    false
                 }
             },
-            _ => {}
-        }
+            _ => false
+        };
         self.editing_state.click_state = ClickState::Released;
+        res
     }
 
     fn quantize_time(&self, abs_tick: u64) -> u64 {
-        abs_tick - (abs_tick % self.editing_state.quantize_unit)
+        let diff = abs_tick % self.editing_state.quantize_unit;
+        if diff > (self.editing_state.quantize_unit / 2) {
+            abs_tick + self.editing_state.quantize_unit - diff
+        } else {
+            abs_tick - diff
+        }
     }
 
     /// returns (abs_tick, note)

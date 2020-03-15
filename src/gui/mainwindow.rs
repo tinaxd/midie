@@ -105,8 +105,11 @@ pub fn construct_main_window() {
 
     let draw_click_released = {
         let ps_c = Rc::clone(&ps);
-        move |_: &gtk::DrawingArea, ev: &gdk::EventButton| {
-            ps_c.borrow_mut().handle_click_released(ev);
+        move |da: &gtk::DrawingArea, ev: &gdk::EventButton| {
+            let redraw = ps_c.borrow_mut().handle_click_released(ev);
+            if redraw {
+                da.queue_draw();
+            }
             Inhibit(true)
         }
     };
