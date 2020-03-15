@@ -22,6 +22,7 @@ pub struct PianorollContext {
     pub ws: Rc<RefCell<MidiWorkspace>>,
     note_height_cache: RefCell<Vec<f64>>,
     editing_state: EditingContext,
+    pub current_track: u8,
 }
 
 #[derive(Debug, Clone)]
@@ -83,6 +84,7 @@ impl PianorollContext {
             viewport, config, ws,
             note_height_cache: RefCell::new(vec![0.0; 128]),
             editing_state: EditingContext::new(),
+            current_track: 0,
         }
     }
 }
@@ -92,6 +94,8 @@ pub struct Viewport {
     pub left_upper_x: f64,
     pub left_upper_y: f64,
     pub max_width: f64,
+    pub width: f64,
+    pub height: f64,
 }
 
 #[derive(Debug, Clone)]
@@ -125,13 +129,12 @@ impl PianorollContext {
 
         cr.set_matrix(init_transform);
         cr.translate(self.config.white_width, 0.0);
-        if let Some(track) = self.ws.borrow().events_abs_tick(1) {
-            let alloc = w.get_allocation();
+        if let Some(track) = self.ws.borrow().events_abs_tick(self.current_track as usize) {
             self.draw_notes(cr, &track.events(), &NoteDrawBounds {
                 left: self.viewport.left_upper_x,
-                right: self.viewport.left_upper_x + alloc.width as f64,
+                right: self.viewport.left_upper_x + self.viewport.width,
                 upper: self.viewport.left_upper_y,
-                lower: self.viewport.left_upper_y + alloc.height as f64
+                lower: self.viewport.left_upper_y + self.viewport.height
             });
         }
 
@@ -246,6 +249,7 @@ impl PianorollContext {
             debug!("[{}] ({}, {}) -> ({}, {})", _note_drawn, start_cord, note_height, end_cord, note_height + self.config.note_height);
             _note_drawn += 1;
         }
+        debug!("{:?}", bounds);
         //debug!("Redrew {} notes", _note_drawn);
     }
 
@@ -268,7 +272,7 @@ impl PianorollContext {
         let width = ctx.viewport.max_width;
         let beat_width = ctx.config.beat_width;
         let ws = RefCell::borrow(&ctx.ws);
-        let ts_info = ws.create_time_signature_info(0);
+        let ts_info = ws.create_time_signature_info(0); // TODO: always track 0?
         if ts_info.is_none() {
             return;
         }
@@ -390,7 +394,7 @@ impl PianorollContext {
                             (end_tick, note, 0, 0)
                         ]);
                         track.clean();
-                        ws.replace_events(1, track.into());
+                        ws.replace_events(self.current_track as usize, track.into()).expect("failed to write to midi track list");
                         //println!("{:#?}", ws.events_abs_tick(1).unwrap());
                         debug!("add note {} (tick {} -> {})", note, start_tick, end_tick);
                         true
@@ -433,7 +437,7 @@ impl PianorollContext {
             }
         }
         let note = try_opt!(note);
-        let abs_x = self.viewport.left_upper_x + pos.0 - self.config.white_width;
+        let abs_x = pos.0 - self.config.white_width;
         let ws = Rc::clone(&self.ws);
         let abs_tick = ((abs_x * ws.borrow().resolution() as f64) / self.config.beat_width) as u64;
         Some((abs_tick, note))

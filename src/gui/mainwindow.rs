@@ -7,16 +7,33 @@ pub fn construct_main_window() {
 
     let builder = gtk::Builder::new_from_file("main.glade");
 
-    let window = builder.get_object::<gtk::ApplicationWindow>("mainApplication").expect("failed to find mainApplication");
+    macro_rules! load {
+        ($t: ty, $id: expr) => {{
+            builder.get_object::<$t>($id).expect(&format!("failed to find {}", $id))
+        }}
+    }
+
+    let window = load!(gtk::ApplicationWindow, "mainApplication");
     window.show();
 
-    let main_scrolled = builder.get_object::<gtk::ScrolledWindow>("mainScrolledWindow").unwrap();
-    let _main_viewport = builder.get_object::<gtk::Viewport>("mainViewport").unwrap();
+    let main_scrolled = load!(gtk::ScrolledWindow, "mainScrolledWindow");
+    let _main_viewport = load!(gtk::Viewport, "mainViewport");
 
-    let drawarea = builder.get_object::<gtk::DrawingArea>("mainDrawingArea").unwrap();
+    let drawarea = load!(gtk::DrawingArea, "mainDrawingArea");
 
-    let open_toolbar_button = builder.get_object::<gtk::ToolButton>("openToolbarButton").unwrap();
-    let redraw_button = builder.get_object::<gtk::ToolButton>("redrawButton").unwrap();
+    let open_toolbar_button = load!(gtk::ToolButton, "openToolbarButton");
+    let redraw_button = load!(gtk::ToolButton, "redrawButton");
+
+    let track_choose_combo = load!(gtk::ComboBox, "trackChooseCombo");
+    let track_list_store = load!(gtk::ListStore, "trackListStore");
+
+    let midi_event_list_store = load!(gtk::ListStore, "midiEventListStore");
+    let _event_list = load!(gtk::TreeView, "mainEventList");
+
+    // let event_type_column = load!(gtk::TreeViewColumn, "eventTypeColumn");
+    // let event_start_column = load!(gtk::TreeViewColumn, "eventStartColumn");
+    // let event_length_column = load!(gtk::TreeViewColumn, "eventLengthColumn");
+    // let event_data_column = load!(gtk::TreeViewColumn, "eventDataColumn");
 
     let ws: Rc<RefCell<crate::smf::MidiWorkspace>> = Rc::new(RefCell::new(crate::smf::MidiWorkspace::default()));
 
@@ -26,11 +43,16 @@ pub fn construct_main_window() {
     let black_height: f64 = 20.0;
     let black_width: f64 = 25.0;
     let ps: Rc<RefCell<super::pianoroll::PianorollContext>> = Rc::new(RefCell::new(super::pianoroll::PianorollContext::new(
-        Viewport {
-            left_upper_x: main_scrolled.get_hadjustment().unwrap().get_value(),
-            left_upper_y: main_scrolled.get_vadjustment().unwrap().get_value(),
-            max_width: 10000.0,
-        },
+        {
+            let h = main_scrolled.get_hadjustment().unwrap();
+            let v = main_scrolled.get_vadjustment().unwrap();
+            Viewport {
+                left_upper_x: h.get_value(),
+                left_upper_y: v.get_value(),
+                max_width: 10000.0,
+                width: h.get_page_size(),
+                height: v.get_page_size()
+            }},
         PianorollConfig {
             white_height,
             white_width,
@@ -44,6 +66,7 @@ pub fn construct_main_window() {
 
     let ws_c = Rc::clone(&ws);
     let window_c = window.clone();
+    let track_store_c = track_list_store.clone();
     open_toolbar_button.connect_clicked(move |_| {
         use gtk::ResponseType::{Cancel, Accept};
         let chooser = gtk::FileChooserDialog::with_buttons(
@@ -65,6 +88,17 @@ pub fn construct_main_window() {
                     let new_ws = crate::smf::MidiWorkspace::from_smf_file(smf_path);
                     match new_ws {
                         Ok(new_ws) => {
+                            // update track list
+                            track_store_c.clear();
+                            for (n, desc) in new_ws.get_track_info() {
+                                let iter = track_store_c.append();
+                                track_store_c.set(&iter,
+                                    &[0, 1, 2],
+                                    &[&n, &desc, &format!("[{}] - {}", n, &desc)]
+                                );
+                            }
+
+                            // replace the current MidiWorkspace
                             let mut ws = RefCell::borrow_mut(&*ws_c);
                             *ws = new_ws;
                         },
@@ -82,14 +116,44 @@ pub fn construct_main_window() {
         chooser.destroy();
     });
 
+    let ps_c = Rc::clone(&ps);
+    let da_c = drawarea.clone();
+    let list_store_c = midi_event_list_store.clone();
+    let ws_c = Rc::clone(&ws);
+    track_choose_combo.connect_changed(move |cb| {
+        use std::convert::TryInto;
+        if let Some(iter) = cb.get_active_iter() {
+            if let Some(model) = cb.get_model() {
+                let gvalue = model.get_value(&iter, 0);
+                let track_number = gvalue.get_some::<i32>().expect("type mismatch");
+                if let Ok(track_number) = track_number.try_into() {
+                    let mut ps = ps_c.borrow_mut();
+                    ps.current_track = track_number;
+                    // redraw piano roll canvas
+                    da_c.queue_draw();
+                    // reset event list
+                    let track = ws_c.borrow().events_abs_tick(track_number as usize);
+                    super::eventlist::event_list_track(&list_store_c, &track.unwrap());
+                    debug!("switched to track {}", track_number);
+                } else {
+                    warn!("invalid track number");
+                }
+            }
+        }
+    });
+
     let draw_all = {
         let ps_c = Rc::clone(&ps);
         let main_scrolled_c = main_scrolled.clone();
         move |w: &gtk::DrawingArea, cr: &cairo::Context| {
+            let h = main_scrolled_c.get_hadjustment().unwrap();
+            let v = main_scrolled_c.get_vadjustment().unwrap();
             ps_c.borrow_mut().viewport = Viewport {
-                left_upper_x: main_scrolled_c.get_hadjustment().unwrap().get_value(),
-                left_upper_y: main_scrolled_c.get_vadjustment().unwrap().get_value(),
+                left_upper_x: h.get_value(),
+                left_upper_y: v.get_value(),
                 max_width: 10000.0,
+                width: h.get_page_size(),
+                height: v.get_page_size()
             };
             ps_c.borrow().pianoroll_draw_handler(w, cr)
         }
@@ -105,10 +169,14 @@ pub fn construct_main_window() {
 
     let draw_click_released = {
         let ps_c = Rc::clone(&ps);
+        let list_store_c = midi_event_list_store.clone();
+        let ws_c = Rc::clone(&ws);
         move |da: &gtk::DrawingArea, ev: &gdk::EventButton| {
             let redraw = ps_c.borrow_mut().handle_click_released(ev);
             if redraw {
                 da.queue_draw();
+                let track = ws_c.borrow().events_abs_tick(ps_c.borrow().current_track as usize).unwrap();
+                super::eventlist::event_list_track(&list_store_c, &track);
             }
             Inhibit(true)
         }
@@ -120,10 +188,9 @@ pub fn construct_main_window() {
         move |h_adjustment: &gtk::Adjustment| {
             let left_upper_x = h_adjustment.get_value();
             let left_upper_y = main_scrolled_c.get_vadjustment().unwrap().get_value();
-            let alloc = draw_area_c.get_allocation();
-            let window_width = alloc.width;
-            let window_height = alloc.height;
-            draw_area_c.queue_draw_area(left_upper_x as i32, left_upper_y as i32, window_width, window_height);
+            let window_width = h_adjustment.get_page_size();
+            let window_height = main_scrolled_c.get_vadjustment().unwrap().get_page_size();
+            draw_area_c.queue_draw_area(left_upper_x as i32, left_upper_y as i32, window_width as i32, window_height as i32);
         }
     };
 
@@ -133,10 +200,9 @@ pub fn construct_main_window() {
         move |v_adjustment: &gtk::Adjustment| {
             let left_upper_x = main_scrolled_c.get_hadjustment().unwrap().get_value();
             let left_upper_y = v_adjustment.get_value();
-            let alloc = draw_area_c.get_allocation();
-            let window_width = alloc.width;
-            let window_height = alloc.height;
-            draw_area_c.queue_draw_area(left_upper_x as i32, left_upper_y as i32, window_width, window_height);
+            let window_width = main_scrolled_c.get_hadjustment().unwrap().get_page_size();
+            let window_height = v_adjustment.get_page_size();
+            draw_area_c.queue_draw_area(left_upper_x as i32, left_upper_y as i32, window_width as i32, window_height as i32);
         }
     };
 
@@ -154,5 +220,6 @@ pub fn construct_main_window() {
         drawarea_c.queue_draw();
     });
 
+    window.connect_destroy(|_| gtk::main_quit());
     gtk::main();
 }

@@ -214,6 +214,21 @@ impl TimeSignatureInfo {
             .max_by_key(|(abs, _)| *abs)
             .map(|(_, ts)| *ts)
     }
+
+    pub fn measure_of_abs_ticks(&self, abs_ticks: &Vec<u64>) -> Result<Vec<(u8, u8)>, ()> {
+        let mut first = true;
+        let mut curr_ts;
+        for abs_tick in abs_ticks {
+            if first {
+                match self.time_signature(*abs_tick) {
+                    Some(ts) => curr_ts = ts,
+                    None => return Err(())
+                }
+            }
+        }
+
+        todo!("not implemented yet")
+    }
 }
 
 impl Into<rimd::TrackEvent> for AbsTrackEvent {
@@ -338,6 +353,15 @@ impl MidiWorkspace {
 
     pub fn resolution(&self) -> i16 {
         self.midi.division
+    }
+
+    // returns (track_number, track_description)
+    pub fn get_track_info(&self) -> Vec<(u8, String)> {
+        // TODO: useful track description
+
+        self.midi.tracks.iter().enumerate()
+            .map(|(i, _)| (i as u8, format!("Track {}", i)))
+            .collect()
     }
 }
 
