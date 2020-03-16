@@ -22,6 +22,7 @@ pub fn construct_main_window() {
     let drawarea = load!(gtk::DrawingArea, "mainDrawingArea");
 
     let open_toolbar_button = load!(gtk::ToolButton, "openToolbarButton");
+    let write_toolbar_button = load!(gtk::ToolButton, "writeToolbarButton");
     let redraw_button = load!(gtk::ToolButton, "redrawButton");
 
     let track_choose_combo = load!(gtk::ComboBox, "trackChooseCombo");
@@ -103,6 +104,50 @@ pub fn construct_main_window() {
                             *ws = new_ws;
                         },
                         Err(e) => warn!("error: {}", e)
+                    }
+                } else {
+                    warn!("could not get filename");
+                }
+            },
+            Cancel => {
+                debug!("Canceled by user");
+            },
+            _ => unreachable!()
+        }
+        chooser.destroy();
+    });
+
+    let ws_c = Rc::clone(&ws);
+    let window_c = window.clone();
+    write_toolbar_button.connect_clicked(move |_| {
+        use gtk::ResponseType::{Cancel, Accept};
+        let chooser = gtk::FileChooserDialog::with_buttons(
+            Some("Save SMF"), Some(&window_c),
+            gtk::FileChooserAction::Save,
+            &[("_Cancel", Cancel), ("_Write", Accept)]);
+        let filter = {
+            let t = gtk::FileFilter::new();
+            t.add_mime_type("audio/midi");
+            t.add_mime_type("audio/x-midi");
+            t
+        };
+        chooser.add_filter(&filter);
+        let response = chooser.run();
+        match response {
+            Accept => {
+                if let Some(write_path) = chooser.get_filename() {
+                    debug!("write_path: {:?}", write_path.to_str());
+                    let file = std::fs::OpenOptions::new().create(true).write(true).open(write_path);
+                    match file {
+                        Ok(file) => {
+                            let ws = ws_c.borrow();
+                            let mut writer = std::io::BufWriter::new(file);
+                            match ws.write_all(&mut writer) {
+                                Ok(_) => info!("write successful"),
+                                Err(e) => error!("write error: {}", e)
+                            }
+                        },
+                        Err(e) => error!("{}", e)
                     }
                 } else {
                     warn!("could not get filename");

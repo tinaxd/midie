@@ -159,7 +159,48 @@ impl AbsTrack {
     }
 
     fn sort_rebuild_delta_time(&mut self) {
-        self.events.sort_by_key(|k| k.abs_time);
+        // tick が同じときは note_off が note_on の前に来なければならない!
+        use std::cmp::{Ord, Ordering};
+        self.events.sort_by(|a, b| {
+            match a.abs_time.cmp(&b.abs_time) {
+                Ordering::Less => Ordering::Less,
+                Ordering::Greater => Ordering::Greater,
+                Ordering::Equal => {
+                    // note_off or note_on の場合は考慮する必要がある
+                    // TODO: note_off note_on 以外も同様のケースはあるか?
+                    match a.track_event.event {
+                        rimd::Event::Midi(ref ea) => {
+                            if let Some(_) = util::note_on(ea) {
+                                match b.track_event.event {
+                                    rimd::Event::Midi(ref eb) => {
+                                        if let Some(_) = util::note_off(eb) {
+                                            Ordering::Greater
+                                        } else {
+                                            Ordering::Equal
+                                        }
+                                    },
+                                    _ => Ordering::Equal
+                                }
+                            } else if let Some(_) = util::note_off(ea) {
+                                Ordering::Less
+                            } else {
+                                match b.track_event.event {
+                                    rimd::Event::Midi(ref eb) => {
+                                        if let Some(_) = util::note_off(eb) {
+                                            Ordering::Greater
+                                        } else {
+                                            Ordering::Equal
+                                        }
+                                    },
+                                    _ => Ordering::Equal
+                                }
+                            }
+                        },
+                        _ => Ordering::Equal
+                    }
+                }
+            }
+        });
         let length = self.events.len();
         for i in 0..length-1 {
             let e1_abs = self.events.get(i).unwrap().abs_time;
@@ -417,6 +458,11 @@ impl MidiWorkspace {
         self.midi.tracks.iter().enumerate()
             .map(|(i, _)| (i as u8, format!("Track {}", i)))
             .collect()
+    }
+
+    pub fn write_all<W: std::io::Write>(&self, writer: &mut W) -> std::io::Result<()> {
+        let smf_writer = rimd::SMFWriter::from_smf(self.midi.clone());
+        smf_writer.write_all(writer)
     }
 }
 

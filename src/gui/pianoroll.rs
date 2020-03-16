@@ -247,11 +247,11 @@ impl PianorollContext {
             }
             cr.rectangle(start_cord, note_height, end_cord - start_cord, self.config.note_height);
             cr.fill();
-            debug!("[{}] ({}, {}) -> ({}, {})", _note_drawn, start_cord, note_height, end_cord, note_height + self.config.note_height);
+            //debug!("[{}] ({}, {}) -> ({}, {})", _note_drawn, start_cord, note_height, end_cord, note_height + self.config.note_height);
             _note_drawn += 1;
         }
         debug!("{:?}", bounds);
-        //debug!("Redrew {} notes", _note_drawn);
+        debug!("Redrew {} notes", _note_drawn);
     }
 
     fn calculate_note_v_cord(&self, note: u8) -> f64 {
@@ -396,7 +396,7 @@ impl PianorollContext {
                     } else {
                         let ws = Rc::clone(&self.ws);
                         let mut ws = ws.borrow_mut();
-                        let mut track = ws.events_abs_tick(1).unwrap();
+                        let mut track = ws.events_abs_tick(self.current_track as usize).unwrap();
                         track.append_notes(vec![
                             (start_tick, note, 100, 0),
                             (end_tick, note, 0, 0)
