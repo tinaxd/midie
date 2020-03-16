@@ -62,6 +62,7 @@ impl EditingContext {
 enum ClickState {
     Released,
     Clicked((f64, f64)),
+    SubClicked((f64, f64)),
 }
 
 impl Default for ClickState {
@@ -366,7 +367,13 @@ impl PianorollContext {
 
     pub fn handle_clicked(&mut self, event: &gdk::EventButton) {
         let pos = event.get_position();
-        self.editing_state.click_state = ClickState::Clicked(pos);
+        let button = event.get_button();
+
+        match button {
+            1 => self.editing_state.click_state = ClickState::Clicked(pos),
+            3 => self.editing_state.click_state = ClickState::SubClicked(pos),
+            _ => {}
+        }
         debug!("Clicked: {:?}", pos);
     }
 
@@ -378,6 +385,7 @@ impl PianorollContext {
                 let clicked_pos_parsed = self.parse_click_position(clicked_pos);
                 let release_pos_parsed = self.parse_click_position(release_pos);
                 debug!("Released: {:?} ({:?}) -> {:?} ({:?})", clicked_pos_parsed, clicked_pos, release_pos_parsed, release_pos);
+                // Note add
                 if clicked_pos_parsed.is_some() && release_pos_parsed.is_some() {
                     let (mut start_tick, note) = clicked_pos_parsed.unwrap();
                     let (mut end_tick, _) = release_pos_parsed.unwrap();
@@ -403,10 +411,45 @@ impl PianorollContext {
                     false
                 }
             },
+            ClickState::SubClicked(clicked_pos) => {
+                // Note delete
+                if let Some(clicked_pos_parsed) = self.parse_click_position(clicked_pos) {
+                    let (tick, note) = clicked_pos_parsed;
+                    debug!("Released(SubClick): {:?} ({:?})", clicked_pos, clicked_pos_parsed);
+                    if self.delete_note_tick_note(tick, note) {
+                        debug!("delete note of tick {} note {}", tick, note);
+                        true
+                    } else {
+                        false
+                    }
+                } else {
+                    false
+                }
+            },
             _ => false
         };
         self.editing_state.click_state = ClickState::Released;
         res
+    }
+
+    /// returns true if note is found and deleted.
+    fn delete_note_tick_note(&mut self, tick: u64, note: u8) -> bool {
+        let ws = Rc::clone(&self.ws);
+        let mut ws = ws.borrow_mut();
+        let mut track = ws.events_abs_tick(self.current_track as usize).unwrap();
+        let (note_info, _) = Self::build_drawing_graph(&track.events());
+        for info in &note_info {
+            if info.note == note && info.start_tick <= tick && tick <= info.end_tick {
+                if track.delete_note((info.start_tick, info.note, info.velocity)) {
+                    track.clean();
+                    ws.replace_events(self.current_track as usize, track.into()).unwrap();
+                    return true;
+                } else {
+                    error!("unrechable");
+                }
+            }
+        }
+        false
     }
 
     fn quantize_time(&self, abs_tick: u64) -> u64 {

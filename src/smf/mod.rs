@@ -110,6 +110,47 @@ impl AbsTrack {
         self.append_notes(vec![(abs_tick, note, velocity, ch)]);
     }
 
+    pub fn delete_note(&mut self, (abs_tick, note, velocity): (u64, u8, u8)) -> bool {
+        self.clean();
+        let mut on = None;
+        let mut off = None;
+        for (i, event) in self.events.iter().enumerate() {
+            if on.is_none() && event.abs_time != abs_tick {
+                continue;
+            }
+            match event.track_event.event {
+                rimd::Event::Midi(ref msg) => {
+                    if on.is_none() {
+                        if let Some((_, e_note, e_velocity)) = util::note_on(msg) {
+                            if e_note == note && e_velocity == velocity {
+                                on = Some(i);
+                            }
+                        }
+                    } else {
+                        if let Some((_, e_note, _)) = util::note_off(msg) {
+                            if e_note == note {
+                                off = Some(i);
+                                break;
+                            }
+                        }
+                    }
+                },
+                _ => {}
+            }
+        }
+        
+        match off {
+            Some(off) => {
+                let on = on.unwrap();
+                self.events.remove(on);
+                self.events.remove(off-1);
+                self.dirty = true;
+                true
+            },
+            None => false
+        }
+    }
+
     pub fn clean(&mut self) {
         if self.dirty {
             self.sort_rebuild_delta_time();
@@ -173,7 +214,14 @@ impl TempoInfo {
     }
 
     pub fn delete(&mut self, deleted: (u64, u16)) {
-        let _ = self.changes.drain_filter(|change| *change == deleted);
+        let mut i = 0;
+        while i != self.changes.len() {
+            if self.changes[i] == deleted {
+                self.changes.remove(i);
+            } else {
+                i += 1;
+            }
+        }
     }
 
     pub fn tempo(&self, abs_tick: u64) -> Option<u16> {
@@ -205,7 +253,14 @@ impl TimeSignatureInfo {
     }
 
     pub fn delete(&mut self, deleted: (u64, (u8, u8))) {
-        let _ = self.changes.drain_filter(|c| *c == deleted);
+        let mut i = 0;
+        while i != self.changes.len() {
+            if self.changes[i] == deleted {
+                self.changes.remove(i);
+            } else {
+                i += 1;
+            }
+        }
     }
 
     pub fn time_signature(&self, abs_tick: u64) -> Option<(u8, u8)> {

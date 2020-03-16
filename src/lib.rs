@@ -1,4 +1,3 @@
-#![feature(drain_filter)]
 extern crate gtk;
 extern crate rimd;
 extern crate cairo;
