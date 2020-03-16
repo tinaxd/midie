@@ -347,7 +347,7 @@ impl Default for MidiWorkspace {
 impl MidiWorkspace {
     pub fn from_smf_file(path: impl AsRef<Path>) -> Result<Self, String> {
         Ok(MidiWorkspace {
-            midi: SMF::from_file(path.as_ref()).map_err(|e| e.to_string())?
+            midi: SMF::from_file(path.as_ref()).map_err(|e| e.to_string())?.to_multi_track().ok_or_else(|| String::from("failed to convert into type 1 smf"))?
         })
     }
 
