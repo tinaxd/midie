@@ -169,6 +169,8 @@ impl AbsTrack {
         // tick が同じときは note_off が note_on の前に来なければならない!
         use std::cmp::Ordering;
         self.events.sort_unstable_by(|a, b| {
+
+            // EndOfTrack は常に最後へ
             if check_end_of_track(a) {
                 return Ordering::Greater;
             } else if check_end_of_track(b) {
