@@ -21,6 +21,7 @@ pub fn construct_main_window() {
 
     let drawarea = load!(gtk::DrawingArea, "mainDrawingArea");
 
+    let new_toolbar_button = load!(gtk::ToolButton, "newToolbarButton");
     let open_toolbar_button = load!(gtk::ToolButton, "openToolbarButton");
     let write_toolbar_button = load!(gtk::ToolButton, "writeToolbarButton");
     let redraw_button = load!(gtk::ToolButton, "redrawButton");
@@ -66,6 +67,15 @@ pub fn construct_main_window() {
     )));
 
     let ws_c = Rc::clone(&ws);
+    let track_store_c = track_list_store.clone();
+    new_toolbar_button.connect_clicked(move |_| {
+        let mut ws = ws_c.borrow_mut();
+        *ws = crate::smf::MidiWorkspace::empty();
+        debug!("created new workspace");
+        update_track_list(&track_store_c, &ws);
+    });
+
+    let ws_c = Rc::clone(&ws);
     let window_c = window.clone();
     let track_store_c = track_list_store.clone();
     open_toolbar_button.connect_clicked(move |_| {
@@ -90,14 +100,7 @@ pub fn construct_main_window() {
                     match new_ws {
                         Ok(new_ws) => {
                             // update track list
-                            track_store_c.clear();
-                            for (n, desc) in new_ws.get_track_info() {
-                                let iter = track_store_c.append();
-                                track_store_c.set(&iter,
-                                    &[0, 1, 2],
-                                    &[&n, &desc, &format!("[{}] - {}", n, &desc)]
-                                );
-                            }
+                            update_track_list(&track_store_c, &new_ws);
 
                             // replace the current MidiWorkspace
                             let mut ws = RefCell::borrow_mut(&*ws_c);
@@ -267,4 +270,15 @@ pub fn construct_main_window() {
 
     window.connect_destroy(|_| gtk::main_quit());
     gtk::main();
+}
+
+fn update_track_list(ls: &gtk::ListStore, ws: &crate::smf::MidiWorkspace) {
+    ls.clear();
+    for (n, desc) in ws.get_track_info() {
+        let iter = ls.append();
+        ls.set(&iter,
+            &[0, 1, 2],
+            &[&n, &desc, &format!("[{}] - {}", n, &desc)]
+        );
+    }
 }

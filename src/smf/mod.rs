@@ -3,7 +3,7 @@ pub mod util;
 use rimd::{SMF, TrackEvent};
 use std::path::Path;
 
-#[derive(Debug)]
+#[derive(Debug, Clone)]
 pub struct MidiWorkspace {
     midi: SMF,
 
@@ -159,9 +159,22 @@ impl AbsTrack {
     }
 
     fn sort_rebuild_delta_time(&mut self) {
+        let check_end_of_track = |ate: &AbsTrackEvent| {
+            match &ate.track_event.event {
+                rimd::Event::Meta(meta) => meta.command == rimd::MetaCommand::EndOfTrack,
+                _ => false
+            }
+        };
+
         // tick が同じときは note_off が note_on の前に来なければならない!
-        use std::cmp::{Ord, Ordering};
-        self.events.sort_by(|a, b| {
+        use std::cmp::Ordering;
+        self.events.sort_unstable_by(|a, b| {
+            if check_end_of_track(a) {
+                return Ordering::Greater;
+            } else if check_end_of_track(b) {
+                return Ordering::Less
+            }
+
             match a.abs_time.cmp(&b.abs_time) {
                 Ordering::Less => Ordering::Less,
                 Ordering::Greater => Ordering::Greater,
@@ -201,12 +214,27 @@ impl AbsTrack {
                 }
             }
         });
+
+        // end_of_track は最後に1つあるはず
+        // end_of_track の abs_tick を修正する
+        let max_abs_time = self.events.get(self.events.len()-2).map(|e| e.abs_time).unwrap_or(0);
+        match self.events.last_mut() {
+            Some(eot) =>  eot.abs_time = max_abs_time,
+            None => {}
+        }
+
+        // deltatime を abstime により修正する
         let length = self.events.len();
         for i in 0..length-1 {
             let e1_abs = self.events.get(i).unwrap().abs_time;
             let e2 = self.events.get_mut(i+1).unwrap();
             e2.track_event.vtime = e2.abs_time - e1_abs;
         }
+    }
+
+    /// エクスポートする前の最終的な整理を行う
+    fn finalize(&mut self) {
+        self.sort_rebuild_delta_time();
     }
 }
 
@@ -461,8 +489,38 @@ impl MidiWorkspace {
     }
 
     pub fn write_all<W: std::io::Write>(&self, writer: &mut W) -> std::io::Result<()> {
+        let mut smf_c = self.clone();
+        smf_c.finalize();
         let smf_writer = rimd::SMFWriter::from_smf(self.midi.clone());
         smf_writer.write_all(writer)
+    }
+
+    /// Create a new MidiWorkspace with two tracks.
+    /// Track 0 for tempo changes and time signatures
+    /// Track 1 for notes
+    pub fn empty() -> Self {
+        let mut smf = rimd::SMFBuilder::new();
+        smf.add_track();
+        smf.add_track();
+        smf.add_meta_abs(0, 0, rimd::MetaEvent::time_signature(4, 2, 24, 8));
+        smf.add_meta_abs(0, 0, rimd::MetaEvent::tempo_setting(120));
+        smf.add_meta_rel(0, 0, rimd::MetaEvent::end_of_track());
+        smf.add_meta_rel(1, 0, rimd::MetaEvent::end_of_track());
+        let mut smf = smf.result();
+        smf.division = 480;
+
+        MidiWorkspace {
+            midi: smf,
+        }
+    }
+
+    fn finalize(&mut self) {
+        let track_count = self.track_count();
+        for i in 0..track_count {
+            let mut abs_track = self.events_abs_tick(i).unwrap();
+            abs_track.finalize();
+            self.replace_events(i, abs_track.into()).unwrap();
+        }
     }
 }
 

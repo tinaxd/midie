@@ -250,7 +250,7 @@ impl PianorollContext {
             //debug!("[{}] ({}, {}) -> ({}, {})", _note_drawn, start_cord, note_height, end_cord, note_height + self.config.note_height);
             _note_drawn += 1;
         }
-        debug!("{:?}", bounds);
+        //debug!("{:?}", bounds);
         debug!("Redrew {} notes", _note_drawn);
     }
 
@@ -392,22 +392,28 @@ impl PianorollContext {
                     start_tick = self.quantize_time(start_tick);
                     end_tick = self.quantize_time(end_tick);
                     if start_tick >= end_tick {
+                        debug!("note_on: invalid range: failed {:?} < {:?}", start_tick, end_tick);
                         false
                     } else {
                         let ws = Rc::clone(&self.ws);
                         let mut ws = ws.borrow_mut();
-                        let mut track = ws.events_abs_tick(self.current_track as usize).unwrap();
-                        track.append_notes(vec![
-                            (start_tick, note, 100, 0),
-                            (end_tick, note, 0, 0)
-                        ]);
-                        track.clean();
-                        ws.replace_events(self.current_track as usize, track.into()).expect("failed to write to midi track list");
-                        //println!("{:#?}", ws.events_abs_tick(1).unwrap());
-                        debug!("add note {} (tick {} -> {})", note, start_tick, end_tick);
-                        true
+                        if let Some(mut track) = ws.events_abs_tick(self.current_track as usize) {
+                            track.append_notes(vec![
+                                (start_tick, note, 100, 0),
+                                (end_tick, note, 0, 0)
+                            ]);
+                            track.clean();
+                            ws.replace_events(self.current_track as usize, track.into()).expect("failed to write to midi track list");
+                            //println!("{:#?}", ws.events_abs_tick(1).unwrap());
+                            debug!("add note {} (tick {} -> {})", note, start_tick, end_tick);
+                            true
+                        } else {
+                            info!("failed to add note: file not open");
+                            false
+                        }
                     }
                 } else {
+                    debug!("note_on: out of bounds: clicked_pos: {:?} released_pos: {:?}", clicked_pos_parsed, release_pos_parsed);
                     false
                 }
             },
