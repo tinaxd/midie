@@ -1,0 +1,2 @@
+//! Cross platform midi playback.
+
