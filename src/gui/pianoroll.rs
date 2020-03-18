@@ -1,8 +1,10 @@
 use gtk::prelude::*;
 use cairo::Context;
 use crate::smf::MidiWorkspace;
+use crate::smf::play::MidiMessage;
 use std::rc::Rc;
 use std::cell::RefCell;
+use std::sync::mpsc::Sender;
 
 pub const WHITE_KEYS: i32 = 69;
 
@@ -23,6 +25,7 @@ pub struct PianorollContext {
     note_height_cache: RefCell<Vec<f64>>,
     editing_state: EditingContext,
     pub current_track: u8,
+    midi_sender: Sender<MidiMessage>
 }
 
 #[derive(Debug, Clone)]
@@ -80,12 +83,13 @@ struct NoteDrawBounds {
 }
 
 impl PianorollContext {
-    pub fn new(viewport: Viewport, config: PianorollConfig, ws: Rc<RefCell<MidiWorkspace>>) -> Self {
+    pub fn new(viewport: Viewport, config: PianorollConfig, ws: Rc<RefCell<MidiWorkspace>>, midi_sender: Sender<MidiMessage>) -> Self {
         PianorollContext {
             viewport, config, ws,
             note_height_cache: RefCell::new(vec![0.0; 128]),
             editing_state: EditingContext::new(),
             current_track: 0,
+            midi_sender
         }
     }
 }
@@ -231,15 +235,16 @@ impl PianorollContext {
         let mut _note_drawn = 0;
         cr.set_source_rgba(1.0, 0.0, 0.0, 1.0);
         for note in &notes {
-            let start_cord = self.calculate_note_h_cord(note.start_tick);
-            if start_cord < bounds.left {
+            let end_cord = self.calculate_note_h_cord(note.end_tick);
+            if end_cord < bounds.left {
                 //debug!("start_cord: {} bounds.left: {}", start_cord, bounds.left);
                 continue;
-            } else if start_cord > bounds.right {
+            }
+            let start_cord = self.calculate_note_h_cord(note.start_tick);
+            if start_cord > bounds.right {
                 //debug!("start_cord: {} bounds.right: {}", start_cord, bounds.right);
                 break;
             }
-            let end_cord = self.calculate_note_h_cord(note.end_tick);
             let note_height = self.calculate_note_v_cord(note.note);
             if note_height < bounds.upper || note_height > bounds.lower {
                 //debug!("note_height: {} bounds.upper: {} bounds.lower: {}", note_height, bounds.upper, bounds.lower);
@@ -370,7 +375,21 @@ impl PianorollContext {
         let button = event.get_button();
 
         match button {
-            1 => self.editing_state.click_state = ClickState::Clicked(pos),
+            1 => {
+                self.editing_state.click_state = ClickState::Clicked(pos);
+                // preview sound
+                if let Some(clicked_note) = self.parse_click_position(pos) {
+                    let msg = rimd::MidiMessage::note_on(clicked_note.1, 100, self.current_track);
+                    self.midi_sender.send(MidiMessage::Midi(msg.data)).unwrap();
+                    let sender_c = self.midi_sender.clone();
+                    let track = self.current_track;
+                    std::thread::spawn(move || {
+                        std::thread::sleep(std::time::Duration::from_secs(1));
+                        let msg = rimd::MidiMessage::note_off(clicked_note.1, 0, track);
+                        let _ = sender_c.send(MidiMessage::Midi(msg.data));
+                    });
+                }
+            },
             3 => self.editing_state.click_state = ClickState::SubClicked(pos),
             _ => {}
         }

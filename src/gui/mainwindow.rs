@@ -103,7 +103,8 @@ pub fn construct_main_window() {
             note_height: (white_height * WHITE_KEYS as f64) / 128.0,
             beat_width: 75.0,
         },
-        Rc::clone(&ws)
+        Rc::clone(&ws),
+        tx.clone()
     )));
 
     let ws_c = Rc::clone(&ws);

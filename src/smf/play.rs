@@ -100,7 +100,10 @@ impl MidiReceiver {
 
     fn send_message(&mut self, data: &[u8]) {
         if let Some(p) = self.player.as_mut() {
-            p.send(data);
+            match p.send(data) {
+                Ok(_) => {},
+                Err(e) => warn!("midi send error: {}", e)
+            }
         }
     }
 }
