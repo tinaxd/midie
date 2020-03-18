@@ -14,7 +14,9 @@ cairo-rs = "*"
 pangocairo = "*"
 log = "*"
 env_logger = "*"
-midir = "*"
 
 [dependencies.rimd]
 git = "https://github.com/RustAudio/rimd.git"
+
+[dependencies.midir]
+git = "https://github.com/Boddlnagg/midir.git"

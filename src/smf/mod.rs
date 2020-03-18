@@ -1,4 +1,5 @@
 pub mod util;
+pub mod play;
 
 use rimd::{SMF, TrackEvent};
 use std::path::Path;

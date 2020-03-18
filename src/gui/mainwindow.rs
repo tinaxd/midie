@@ -1,11 +1,15 @@
 use gtk::prelude::*;
 use std::rc::Rc;
 use std::cell::RefCell;
+use std::sync::mpsc;
+
+use crate::smf::play::{MidiPlayer, MidiProber, MidiMessage};
 
 pub fn construct_main_window() {
     gtk::init().expect("failed to initialize GTK");
 
     let builder = gtk::Builder::new_from_file("main.glade");
+    let settings_builder = gtk::Builder::new_from_file("settings.glade");
 
     macro_rules! load {
         ($t: ty, $id: expr) => {{
@@ -25,6 +29,7 @@ pub fn construct_main_window() {
     let open_toolbar_button = load!(gtk::ToolButton, "openToolbarButton");
     let write_toolbar_button = load!(gtk::ToolButton, "writeToolbarButton");
     let redraw_button = load!(gtk::ToolButton, "redrawButton");
+    let settings_toolbar_button = load!(gtk::ToolButton, "settingsToolbarButton");
 
     let track_choose_combo = load!(gtk::ComboBox, "trackChooseCombo");
     let track_list_store = load!(gtk::ListStore, "trackListStore");
@@ -38,6 +43,41 @@ pub fn construct_main_window() {
     // let event_data_column = load!(gtk::TreeViewColumn, "eventDataColumn");
 
     let ws: Rc<RefCell<crate::smf::MidiWorkspace>> = Rc::new(RefCell::new(crate::smf::MidiWorkspace::default()));
+    let (tx, rx) = mpsc::channel::<MidiMessage>();
+    std::thread::spawn(move || {
+        crate::smf::play::MidiReceiver::start(rx);
+    });
+
+    let tx_c = tx.clone();
+    settings_toolbar_button.connect_clicked(move |_| {
+        let settings_window = settings_builder.get_object::<gtk::Window>("settingsWindow").expect("failed to find settingsWindow");
+        let midi_device_list_store = settings_builder.get_object::<gtk::ListStore>("midiDeviceList").expect("failed to find midiDeviceList");
+        let midi_device_combo = settings_builder.get_object::<gtk::ComboBox>("midiDeviceCombo").expect("failed to find midiDeviceCombo");
+
+        let tx_cc = tx_c.clone();
+        midi_device_combo.connect_changed(move |c| {
+            use std::convert::TryInto;
+            if let Some(iter) = c.get_active_iter() {
+                if let Some(model) = c.get_model() {
+                    let value = model.get_value(&iter, 0);
+                    let port_number = value.get_some::<i32>().unwrap();
+                    match port_number.try_into() {
+                        Ok(port_number) => {
+                            tx_cc.send(MidiMessage::ChangePort(port_number)).unwrap();
+                            debug!("new midi_player instance");
+                        },
+                        Err(e) => error!("invalid port number: {}", e)
+                    }
+                }
+            }
+        });
+
+        settings_window.connect_delete_event(|w, _| Inhibit(w.hide_on_delete()));
+
+        fetch_midi_output_device_list(&midi_device_list_store);
+        // TODO: set active selection to currently selected midi device
+        settings_window.show();
+    });
 
     use super::pianoroll::{Viewport, PianorollConfig, WHITE_KEYS};
     let white_height: f64 = 30.0;
@@ -280,5 +320,22 @@ fn update_track_list(ls: &gtk::ListStore, ws: &crate::smf::MidiWorkspace) {
             &[0, 1, 2],
             &[&n, &desc, &format!("[{}] - {}", n, &desc)]
         );
+    }
+}
+
+fn fetch_midi_output_device_list(ls: &gtk::ListStore) {
+    ls.clear();
+    match MidiProber::new("midie") {
+        Ok(mb) => {
+            for (i, port) in mb.list_ports().iter().enumerate() {
+                let port_name = mb.port_name(port).unwrap_or_else(|_| String::from("port name unknown"));
+                let iter = ls.append();
+                ls.set(&iter,
+                    &[0, 1],
+                    &[&(i as i32), &port_name]
+                )
+            }
+        },
+        Err(e) => error!("{}", e)
     }
 }
