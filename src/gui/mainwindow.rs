@@ -256,6 +256,17 @@ pub fn construct_main_window() {
         }
     };
 
+    let draw_motion = {
+        let ps_c = Rc::clone(&ps);
+        move |da: &gtk::DrawingArea, ev: &gdk::EventMotion| {
+            let redraw = ps_c.borrow_mut().handle_draw_motion(ev);
+            if redraw {
+                da.queue_draw();
+            }
+            Inhibit(true)
+        }
+    };
+
     let draw_click_released = {
         let ps_c = Rc::clone(&ps);
         let list_store_c = midi_event_list_store.clone();
@@ -297,6 +308,8 @@ pub fn construct_main_window() {
 
     drawarea.connect_draw(draw_all);
     drawarea.connect_button_press_event(draw_clicked);
+    drawarea.add_events(gdk::EventMask::POINTER_MOTION_MASK);
+    drawarea.connect_motion_notify_event(draw_motion);
     drawarea.connect_button_release_event(draw_click_released);
 
     main_scrolled.get_hadjustment().unwrap().connect_value_changed(redraw_all_h);

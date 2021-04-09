@@ -62,9 +62,25 @@ impl EditingContext {
 }
 
 #[derive(Debug, Clone, Copy)]
+struct NoteEditState {
+    start: (f64, f64),
+    end: Option<(f64, f64)>
+}
+
+impl NoteEditState {
+    pub fn only_start(pos: (f64, f64)) -> Self {
+        Self{start: pos, end: None}
+    }
+
+    pub fn start_end(start: (f64, f64), end: (f64, f64)) -> Self {
+        Self{start: start, end: Some(end)}
+    }
+}
+
+#[derive(Debug, Clone, Copy)]
 enum ClickState {
     Released,
-    Clicked((f64, f64)),
+    Clicked(NoteEditState),
     SubClicked((f64, f64)),
 }
 
@@ -113,12 +129,60 @@ pub struct PianorollConfig {
     pub beat_width: f64,
 }
 
+trait NoteDrawable {
+    fn note(&self) -> u8;
+    fn start_tick(&self) -> u64;
+    fn end_tick(&self) -> u64;
+}
+
 # [derive(Debug, Clone)]
 struct IndependentNoteDrawingInfo {
     pub note: u8,
     pub start_tick: u64,
     pub end_tick: u64,
     pub velocity: u8,
+}
+
+impl NoteDrawable for IndependentNoteDrawingInfo {
+    fn note(&self) -> u8 {
+        self.note
+    }
+
+    fn start_tick(&self) -> u64 {
+        self.start_tick
+    }
+
+    fn end_tick(&self) -> u64 {
+        self.end_tick
+    }
+}
+
+#[derive(Debug, Clone)]
+struct MinimalNote {
+    pub note: u8,
+    pub start_tick: u64,
+    pub end_tick: u64
+}
+
+impl NoteDrawable for MinimalNote {
+    fn note(&self) -> u8 {
+        self.note
+    }
+
+    fn start_tick(&self) -> u64 {
+        self.start_tick
+    }
+
+    fn end_tick(&self) -> u64 {
+        self.end_tick
+    }
+}
+
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+enum NoteDrawnPosition {
+    Correct,
+    Up, Down, Right, Left,
+    Invalid
 }
 
 # [derive(Debug, Clone)]
@@ -135,17 +199,22 @@ impl PianorollContext {
         cr.set_matrix(init_transform);
         cr.translate(self.config.white_width, 0.0);
         if let Some(track) = self.ws.borrow().events_abs_tick(self.current_track as usize) {
-            self.draw_notes(cr, &track.events(), &NoteDrawBounds {
-                left: self.viewport.left_upper_x,
-                right: self.viewport.left_upper_x + self.viewport.width,
-                upper: self.viewport.left_upper_y,
-                lower: self.viewport.left_upper_y + self.viewport.height
-            });
+            self.draw_notes(cr, &track.events(), &self.full_note_draw_bounds());
+            self.draw_pending_note(cr);
         }
 
         self.draw_timeline(w, cr);
 
         Inhibit(true)
+    }
+
+    fn full_note_draw_bounds(&self) -> NoteDrawBounds {
+        NoteDrawBounds {
+            left: self.viewport.left_upper_x,
+            right: self.viewport.left_upper_x + self.viewport.width,
+            upper: self.viewport.left_upper_y,
+            lower: self.viewport.left_upper_y + self.viewport.height
+        }
     }
 
     fn draw_keyboard(&self, cr: &Context) {
@@ -229,34 +298,77 @@ impl PianorollContext {
         }
     }
 
+    fn draw_a_note<N: NoteDrawable>(&self, cr: &Context, bounds: &NoteDrawBounds, note: &N) -> NoteDrawnPosition {
+        let end_cord = self.calculate_note_h_cord(note.end_tick());
+        if end_cord < bounds.left {
+            //debug!("start_cord: {} bounds.left: {}", start_cord, bounds.left);
+            return NoteDrawnPosition::Left;
+        }
+        let start_cord = self.calculate_note_h_cord(note.start_tick());
+        if start_cord > bounds.right {
+            //debug!("start_cord: {} bounds.right: {}", start_cord, bounds.right);
+            return NoteDrawnPosition::Right;
+        }
+        let note_height = self.calculate_note_v_cord(note.note());
+        if note_height < bounds.upper {
+            return NoteDrawnPosition::Up;
+        } else if note_height > bounds.lower {
+            return NoteDrawnPosition::Down;
+        }
+        if start_cord < end_cord {
+            cr.rectangle(start_cord, note_height, end_cord - start_cord, self.config.note_height);
+            cr.fill();
+            NoteDrawnPosition::Correct
+        } else {
+            NoteDrawnPosition::Invalid
+        }
+    }
+
     fn draw_notes(&self, cr: &Context, track: &Vec<crate::smf::AbsTrackEvent>, bounds: &NoteDrawBounds) {
         let (notes, _) = Self::build_drawing_graph(track);
 
         let mut _note_drawn = 0;
         cr.set_source_rgba(1.0, 0.0, 0.0, 1.0);
         for note in &notes {
-            let end_cord = self.calculate_note_h_cord(note.end_tick);
-            if end_cord < bounds.left {
-                //debug!("start_cord: {} bounds.left: {}", start_cord, bounds.left);
-                continue;
-            }
-            let start_cord = self.calculate_note_h_cord(note.start_tick);
-            if start_cord > bounds.right {
-                //debug!("start_cord: {} bounds.right: {}", start_cord, bounds.right);
-                break;
-            }
-            let note_height = self.calculate_note_v_cord(note.note);
-            if note_height < bounds.upper || note_height > bounds.lower {
-                //debug!("note_height: {} bounds.upper: {} bounds.lower: {}", note_height, bounds.upper, bounds.lower);
-                continue;
-            }
-            cr.rectangle(start_cord, note_height, end_cord - start_cord, self.config.note_height);
-            cr.fill();
+            match self.draw_a_note(cr, bounds, note) {
+                NoteDrawnPosition::Left | NoteDrawnPosition::Up | NoteDrawnPosition::Down | NoteDrawnPosition::Invalid => continue,
+                NoteDrawnPosition::Right => break,
+                _ => {}
+            };
             //debug!("[{}] ({}, {}) -> ({}, {})", _note_drawn, start_cord, note_height, end_cord, note_height + self.config.note_height);
             _note_drawn += 1;
         }
         //debug!("{:?}", bounds);
         debug!("Redrew {} notes", _note_drawn);
+    }
+
+    // draw shadow notes when editing a note
+    fn draw_pending_note(&self, cr: &Context) {
+        match self.editing_state.click_state() {
+            ClickState::Clicked(clicked_pos) => {
+                match clicked_pos.end {
+                    Some(end_pos) => {
+                        let start_pos = clicked_pos.start;
+                        cr.set_source_rgba(1.0, 0.0, 0.0, 0.5); // transparent red color
+                        let start_info = self.parse_click_position(start_pos);
+                        let end_info = self.parse_click_position(end_pos);
+                        if start_info.is_some() && end_info.is_some() {
+                            let (start_tick, start_note) = start_info.unwrap();
+                            let (end_tick, _) = end_info.unwrap(); // end_note should be equal to start_note
+                            let start_quantized = self.quantize_time(start_tick);
+                            let end_quantized = self.quantize_time(end_tick);
+                            self.draw_a_note(cr, &self.full_note_draw_bounds(), &MinimalNote{
+                                note: start_note,
+                                start_tick: start_quantized,
+                                end_tick: end_quantized
+                            });
+                        }
+                    },
+                    None => {}
+                }
+            },
+            _ => {}
+        }
     }
 
     fn calculate_note_v_cord(&self, note: u8) -> f64 {
@@ -376,7 +488,7 @@ impl PianorollContext {
 
         match button {
             1 => {
-                self.editing_state.click_state = ClickState::Clicked(pos);
+                self.editing_state.click_state = ClickState::Clicked(NoteEditState::only_start(pos));
                 // preview sound
                 if let Some(clicked_note) = self.parse_click_position(pos) {
                     let msg = rimd::MidiMessage::note_on(clicked_note.1, 100, self.current_track);
@@ -396,12 +508,24 @@ impl PianorollContext {
         debug!("Clicked: {:?}", pos);
     }
 
+    pub fn handle_draw_motion(&mut self, event: &gdk::EventMotion) -> bool {
+        match self.editing_state.click_state() {
+            ClickState::Clicked(clicked_pos) => {
+                // editing notes...
+                let end_pos = event.get_position();
+                self.editing_state.click_state = ClickState::Clicked(NoteEditState::start_end(clicked_pos.start, end_pos));
+                true
+            },
+            _ => false
+        }
+    }
+
     /// returns whether redraw is needed.
     pub fn handle_click_released(&mut self, event: &gdk::EventButton) -> bool {
         let res = match self.editing_state.click_state() {
             ClickState::Clicked(clicked_pos) => {
                 let release_pos = event.get_position();
-                let clicked_pos_parsed = self.parse_click_position(clicked_pos);
+                let clicked_pos_parsed = self.parse_click_position(clicked_pos.start);
                 let release_pos_parsed = self.parse_click_position(release_pos);
                 debug!("Released: {:?} ({:?}) -> {:?} ({:?})", clicked_pos_parsed, clicked_pos, release_pos_parsed, release_pos);
                 // Note add
