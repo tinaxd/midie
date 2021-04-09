@@ -9,9 +9,13 @@ pub fn note_on(msg: &MidiMessage) -> Option<(u8, u8, u8)> {
 
     let first = data.get(0).unwrap();
     if 0b10010000 <= *first && *first < 0b10100000 {
+        let velocity = data.get(2).unwrap();
+        if *velocity == 0 {
+            // should be parsed as note_off
+            return None;
+        }
         let ch = *first - 0b10010000;
         let note = data.get(1).unwrap();
-        let velocity = data.get(2).unwrap();
         return Some((ch, *note, *velocity));
     }
 
@@ -30,6 +34,13 @@ pub fn note_off(msg: &MidiMessage) -> Option<(u8, u8, u8)> {
         let note = data.get(1).unwrap();
         let velocity = data.get(2).unwrap();
         return Some((ch, *note, *velocity));
+    } else if 0b10010000 <= *first && *first < 0b10100000 {
+        let velocity = data.get(2).unwrap();
+        if *velocity == 0 {
+            let ch = *first - 0b10010000;
+            let note = data.get(1).unwrap();
+            return Some((ch, *note, 0));
+        }
     }
 
     None
