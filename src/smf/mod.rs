@@ -527,6 +527,10 @@ impl MidiWorkspace {
     }
 }
 
+pub struct WorkspaceSequencer {
+    
+}
+
 #[test]
 fn test_time_signature_creation() {
     let ws = MidiWorkspace::from_smf_file("test_midi0.mid").unwrap();

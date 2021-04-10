@@ -118,7 +118,14 @@ pub enum MidiMessage {
 #[test]
 fn open_port_twice() {
     let mb = MidiProber::new("midie").unwrap();
-    let _ = mb.list_ports();
+    let ports = mb.list_ports();
+    for port in &ports {
+        if let Ok(port_name) = mb.port_name(port) {
+            println!("Port: {}", port_name);
+        } else {
+            println!("Port name fetch error");
+        }
+    }
     let p = mb.create_midi_player(0, "p1").unwrap();
     p.close();
 
