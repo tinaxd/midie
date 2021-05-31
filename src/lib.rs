@@ -8,3 +8,4 @@ extern crate midir;
 
 pub mod gui;
 pub mod smf;
+pub mod data;
